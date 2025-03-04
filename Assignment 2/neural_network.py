@@ -14,6 +14,7 @@ Y_test = pd.read_csv("Y_test.csv", header=None, delimiter=r"\s+").astype(float).
 '''
 Define the activation functions and their derivatives.
 '''
+# Activation Functions
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
@@ -42,7 +43,7 @@ activation_functions = {
 Define all the functions for building and training the neural network.
 '''
 
-# Setting the parameters.
+# Setting the parameters
 def initialize_params(X_train, hidden_size):
   W1 = np.random.randn(X_train.shape[1], hidden_size) * 0.01
   b1 = np.zeros((1, hidden_size))
@@ -51,7 +52,6 @@ def initialize_params(X_train, hidden_size):
 
   return W1, b1, W2, b2
 
-# Updating the parameters.
 def update_params(W1, b1, W2, b2, dL_dW1, dL_db1, dL_dW2, dL_db2):
   W1 -= learning_rate * dL_dW1
   b1 -= learning_rate * dL_db1
@@ -60,14 +60,18 @@ def update_params(W1, b1, W2, b2, dL_dW1, dL_db1, dL_dW2, dL_db2):
 
   return W1, b1, W2, b2
 
-# Forward pass.
+# MSE Loss
+def mse_loss(Y, Y_pred):
+    return np.mean((Y - Y_pred) ** 2)
+
+# Forward pass
 def forward_pass(X, W1, b1, W2, b2, activation_func):
     Z1 = np.dot(X, W1) + b1
     A1 = activation_func(Z1)
     Z2 = np.dot(A1, W2) + b2
     return Z1, A1, Z2
 
-# Backward propagation.
+# Backward propagation
 def backpropagation(X, Y, Z1, A1, Z2, W2, activation_deriv, learning_rate):
     dL_dY_pred = 2 * (Z2 - Y) / Y.shape[0]
     dL_dW2 = np.dot(A1.T, dL_dY_pred)
@@ -96,12 +100,13 @@ def train_network(X_train, Y_train, X_test, Y_test, hidden_size, learning_rate, 
     # Initialize parameters.
     W1, b1, W2, b2 = initialize_params(X_train, hidden_size)
 
-    losses_train = []
+    losses = []
     for epoch in range(num_epochs):
         Z1, A1, Z2 = forward_pass(X_train, W1, b1, W2, b2, activation_func)
         
-        loss_train = np.mean((Y_train - Z2) ** 2)
-        losses_train.append(loss_train)
+        # Calculate the loss.
+        mse = mse_loss(Y_train, Z2)
+        losses.append(mse)
 
         # Backpropagation.
         dL_dW1, dL_db1, dL_dW2, dL_db2 = backpropagation(
@@ -117,7 +122,7 @@ def train_network(X_train, Y_train, X_test, Y_test, hidden_size, learning_rate, 
 
         # Print the loss every 100 epochs.
         if epoch % 100 == 0 or epoch == num_epochs-1:
-            print(f"    Epoch {epoch}, Train Loss: {loss_train:.4f}")
+            print(f"    Epoch {epoch}, Train Loss: {mse:.4f}")
 
     # Generate Predictions
     _, _, Y_pred = forward_pass(X_test, W1, b1, W2, b2, activation_func)
@@ -126,11 +131,12 @@ def train_network(X_train, Y_train, X_test, Y_test, hidden_size, learning_rate, 
     return {
         "hidden_size": hidden_size,
         "activation_function": activation,
-        "final_loss": loss_train,
-        "losses_train": losses_train,
+        "final_loss": mse,
+        "losses": losses,
         "weights": (W1, b1, W2, b2),
         "predictions": Y_pred
     }
+
 
 '''
 Define functions for creating the plots.
@@ -138,7 +144,7 @@ Define functions for creating the plots.
 # Plot training loss
 def plot_train_loss(results):
     plt.figure(figsize=(8, 6))
-    plt.plot(results["losses_train"], label="Training Loss")
+    plt.plot(results["losses"], label="Training Loss")
     plt.xlabel("Epochs")
     plt.ylabel("MSE Loss")
     plt.title(f"Training Loss for {results['activation_function']} with {results['hidden_size']} Neurons, Learning rate = {learning_rate}")
@@ -166,9 +172,9 @@ Training the Neural Network by manually choosing:
 
 # Define training parameters
 hidden_size = 10  # Choose the number of hidden neurons
-learning_rate = 0.01
+learning_rate = 0.1 
 num_epochs = 1000  
-activation = "relu"  # Choose from "sigmoid", "relu", "tanh"
+activation = "sigmoid"  # Choose from "sigmoid", "relu", "tanh"
 
 # Train the model
 results = train_network(X_train, Y_train, X_test, Y_test, hidden_size, learning_rate, num_epochs, activation)
