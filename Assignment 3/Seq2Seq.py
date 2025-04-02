@@ -102,7 +102,7 @@ def load_data(input_len, summary_len):
 """ Define the RNN model. """
 class Seq2SeqModel(nn.Module):
     def __init__(self, input_vocab_size, output_vocab_size,
-                 embedding_dim=256, hidden_dim=512, dropout=0.2):
+                 embedding_dim=256, hidden_dim=512, dropout=0.2, learning_rate=1e-4):
         super().__init__()
         # Encoder
         self.encoder_embedding = nn.Embedding(input_vocab_size, embedding_dim, padding_idx=0)
@@ -194,40 +194,43 @@ def evaluate_model(model, val_loader, criterion):
     model.train()
     return total_loss / len(val_loader)
 
-def greedy_decode(model, src, summary_vocab, max_len=128):
-    """
-    Simple greedy decoding (no beam search) for demonstration.
-    """
+# Decode using beam search.
+def decode(model, src, summary_vocab, max_len=128, beam_width=3):
     model.eval()
     with torch.no_grad():
-        # Encode
         embedded_src = model.encoder_embedding(src)
-        _, (hidden, cell) = model.encoder_lstm(embedded_src)
+        encoder_outputs, (hidden, cell) = model.encoder_lstm(embedded_src)
 
-        # Start token
         start_id = summary_vocab['<start>']
-        end_id   = summary_vocab['<end>']
+        end_id = summary_vocab['<end>']
 
-        # Decoder input initially = <start>
-        input_token = torch.tensor([start_id], device=DEVICE).unsqueeze(0)  # shape: (1, 1)
+        beams = [([start_id], 0.0, hidden, cell)]
 
-        decoded_tokens = []
         for _ in range(max_len):
-            embedded_tgt = model.decoder_embedding(input_token)
-            dec_output, (hidden, cell) = model.decoder_lstm(embedded_tgt, (hidden, cell))
-            preds = model.fc(dec_output.squeeze(1))
-            next_token = preds.argmax(1)
+            new_beams = []
+            for seq, score, hidden, cell in beams:
+                if seq[-1] == end_id:
+                    new_beams.append((seq, score, hidden, cell))
+                    continue
 
-            # Accumulate token
-            decoded_tokens.append(next_token.item())
+                input_token = torch.tensor([[seq[-1]]], device=DEVICE)
+                embedded = model.decoder_embedding(input_token)
+                output, (hidden_new, cell_new) = model.decoder_lstm(embedded, (hidden, cell))
+                logits = model.fc(output.squeeze(1))
+                probs = torch.log_softmax(logits, dim=-1)
 
-            # If <end>, stop
-            if next_token.item() == end_id:
-                break
+                topk_probs, topk_ids = probs.topk(beam_width)  # both shape: [1, beam_width]
+                for i in range(beam_width):
+                    new_seq = seq + [topk_ids[0, i].item()]
+                    new_score = score + topk_probs[0, i].item()
+                    new_beams.append((new_seq, new_score, hidden_new, cell_new))
 
-            input_token = next_token.unsqueeze(0)  # shape: (1, 1)
 
-    return decoded_tokens
+            beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
+
+        best_seq = beams[0][0]
+        return best_seq
+
 
 def calculate_bleu(model, test_input, test_target, summary_vocab, limit=50):
     """
@@ -242,7 +245,7 @@ def calculate_bleu(model, test_input, test_target, summary_vocab, limit=50):
         tgt_seq = test_target[i]                          # shape: (seq_len,)
 
         # Decode
-        pred_ids = greedy_decode(model, src_seq, summary_vocab)
+        pred_ids = decode(model, src_seq, summary_vocab, max_len=128, beam_width=3)
         # Convert IDs -> words (filter out <pad>, <unk>, <start>, <end>)
         pred_tokens = [
             rev_summary_vocab.get(idx, '<unk>') 
@@ -261,7 +264,7 @@ def calculate_bleu(model, test_input, test_target, summary_vocab, limit=50):
     results = bleu.compute(predictions=predictions, references=references)
     return results["bleu"]
 
-def run_experiment(input_len, summary_len, epochs, batch_size, learning_rate ):
+def run_experiment(input_len, summary_len, epochs, batch_size, lr=1e-4 ):
     print(f"\n--- Running experiment: input_len={input_len}, summary_len={summary_len} ---")
 
     # Load & tokenize
@@ -285,12 +288,12 @@ def run_experiment(input_len, summary_len, epochs, batch_size, learning_rate ):
         embedding_dim=256,
         hidden_dim=512,
         dropout=0.2,
-        lr = learning_rate
+        learning_rate = lr
     ).to(DEVICE)
 
     # Loss + Optim
     criterion = nn.CrossEntropyLoss(ignore_index=0)
-    optimizer = optim.Adam(model.parameters(), lr=5e-4)
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     # Train
     train_losses, val_losses = train_model(
@@ -312,14 +315,8 @@ def run_experiment(input_len, summary_len, epochs, batch_size, learning_rate ):
 
 """ Training the model for different configurations, evaluate BLEU score. """
 results = {}
-bleu = run_experiment(1024, 128, epochs=50, batch_size=32)
+bleu = run_experiment(1024, 128, epochs=25, batch_size=32)
 results[(1024, 128)] = bleu
-bleu = run_experiment(2048, 128, epochs=50, batch_size=32)
-results[(2048, 128)] = bleu
-bleu = run_experiment(1024, 256, epochs=50, batch_size=32)
-results[(1024, 256)] = bleu
-bleu = run_experiment(2048, 256, epochs=50, batch_size=32)
-results[(2048, 256)] = bleu
 print("\n=== Final Results ===")
 for (i_len, s_len), score in results.items():
     print(f"Input={i_len}, Summary={s_len} => BLEU={score:.4f}")
